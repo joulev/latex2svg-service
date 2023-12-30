@@ -3,8 +3,12 @@ import { unlink } from "node:fs/promises";
 
 const allowedApiKeys = new Set((process.env.ALLOWED_API_KEYS || "").split(","));
 
-// Workaround of Bun not doing multipart/form-data well
-async function getPdf(form: FormData) {
+async function getPdf(
+  form: FormData
+): Promise<
+  { success: false; log: string } | { success: true; arrayBuffer: ArrayBuffer }
+> {
+  // Workaround of Bun not doing multipart/form-data well
   const textBody = await new Response(form).text();
   const pdfResponse = await fetch("https://texlive.net/cgi-bin/latexcgi", {
     method: "POST",
@@ -15,12 +19,19 @@ async function getPdf(form: FormData) {
         .slice(2)}`,
     },
   });
-  return pdfResponse;
+
+  const isPdf = pdfResponse.headers
+    .get("Content-Type")
+    ?.includes("application/pdf");
+
+  if (!isPdf) return { success: false, log: await pdfResponse.text() };
+  return { success: true, arrayBuffer: await pdfResponse.arrayBuffer() };
 }
 
 const app = new Elysia()
 
   .onBeforeHandle(({ request, set }) => {
+    if (process.env.NODE_ENV === "development") return;
     const auth = request.headers.get("Authorization");
     const token = auth?.split(" ").at(1);
     if (!token || !allowedApiKeys.has(token)) {
@@ -37,11 +48,17 @@ const app = new Elysia()
       form.append("filecontents[]", body.fileContent);
       form.append("return", "pdf");
 
-      const pdfResponse = await getPdf(form);
+      const result = await getPdf(form);
+
+      if (!result.success) {
+        set.status = 400;
+        set.headers["Content-Type"] = "text/plain";
+        return result.log;
+      }
 
       const pdfFileName = `/tmp/${crypto.randomUUID()}.pdf`;
       const svgFileName = `/tmp/${crypto.randomUUID()}.svg`;
-      await Bun.write(pdfFileName, pdfResponse);
+      await Bun.write(pdfFileName, result.arrayBuffer);
 
       // Only capture the first page
       const process = Bun.spawnSync(["pdf2svg", pdfFileName, svgFileName, "1"]);
