@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import { unlink } from "node:fs/promises";
 
-// const allowedApiKeys = new Set((process.env.ALLOWED_API_KEYS || "").split(","));
+const allowedApiKeys = new Set((process.env.ALLOWED_API_KEYS || "").split(","));
 
 const content = `
 \\documentclass[tikz]{standalone}
@@ -33,14 +33,14 @@ async function getPdf(form: FormData) {
 
 const app = new Elysia()
 
-  // .onRequest(({ request, set }) => {
-  //   const auth = request.headers.get("Authorization");
-  //   const token = auth?.split(" ").at(1);
-  //   if (!token || !allowedApiKeys.has(token)) {
-  //     set.status = 401;
-  //     return "Unauthorized";
-  //   }
-  // })
+  .onBeforeHandle(({ request, set }) => {
+    const auth = request.headers.get("Authorization");
+    const token = auth?.split(" ").at(1);
+    if (!token || !allowedApiKeys.has(token)) {
+      set.status = 401;
+      return "Unauthorized";
+    }
+  })
 
   .get("/v1", async ({ set }) => {
     const form = new FormData();
